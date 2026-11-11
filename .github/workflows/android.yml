@@ -11,24 +11,22 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Ubuntu 26 마이그레이션 충돌을 방지하기 위해 안정적인 24.04 LTS 버전 사용
+    runs-on: ubuntu-24.04
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
+          cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Accept Android SDK Licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
 
       - name: Prepare release signing
         env:
@@ -44,15 +42,27 @@ jobs:
               echo "ANDROID_KEYSTORE_PASSWORD=$STORE_PASSWORD"
               echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
               echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+              echo "HAS_KEYSTORE=true"
             } >> "$GITHUB_ENV"
+          else
+            echo "HAS_KEYSTORE=false" >> "$GITHUB_ENV"
           fi
 
-      - name: Build release APK
-        run: chmod +x ./gradlew && ./gradlew :app:assembleRelease --stacktrace --no-daemon
+      - name: Build APK
+        run: |
+          chmod +x ./gradlew
+          if [ "$HAS_KEYSTORE" = "true" ]; then
+            ./gradlew :app:assembleRelease --stacktrace --no-daemon
+          else
+            echo "Keystore secret not found. Building Debug APK instead..."
+            ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: gifforfree-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
